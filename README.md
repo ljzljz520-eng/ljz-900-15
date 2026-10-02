@@ -54,6 +54,16 @@ docker exec -i <mysql_container_name> mysql -uroot -proot hygiene_audit < backen
 
 脚本会为 `records.check_date` 赋值：优先取 `created_at` 的日期部分，缺失时使用当前日期。
 
+若需要支持整改图「重新上传并保留最后一次上传时间」，可执行：
+
+```bash
+docker exec -i <mysql_container_name> mysql -uroot -proot hygiene_audit < backend/database/migrate_add_fix_uploaded_at.sql
+```
+
+脚本会新增 `records.fix_uploaded_at` 字段，并用 `created_at` 回填已有整改图的历史记录。
+
+> 整改图上传限制：仅支持 JPG / PNG / GIF / WEBP，单张不超过 10MB；超限会提示压缩或重拍。同一个 key 可反复重新上传，以最后一次为准并记录最后上传时间。
+
 ## Docker 说明
 
 - 数据库使用 `utf8mb4` 字符集，连接时指定 charset。

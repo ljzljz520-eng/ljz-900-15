@@ -191,7 +191,26 @@ class RecordController
             if (!$fixImage) {
                 return api_json(['code' => 400, 'message' => '缺少 fix_image', 'data' => null]);
             }
+            $fixImage = (string) $fixImage;
+
+            // 员工只能把自己目录下的图片挂到记录上，防止用别人的上传地址
+            $ownPrefix = '/uploads/employees/' . (int) $user->id . '/';
+            if (strpos($fixImage, $ownPrefix) !== 0) {
+                return api_json(['code' => 403, 'message' => '无权使用该图片', 'data' => null]);
+            }
+
+            // 重新上传时删除旧整改图，避免残留文件堆积
+            $oldImage = (string) ($record->fix_image ?? '');
+            if ($oldImage !== '' && $oldImage !== $fixImage) {
+                $oldReal = public_path() . ltrim($oldImage, '/');
+                if (is_file($oldReal)) {
+                    @unlink($oldReal);
+                }
+            }
+
+            // 同一个 key 可反复上传，始终保留最后一次上传时间
             $record->fix_image = $fixImage;
+            $record->fix_uploaded_at = date('Y-m-d H:i:s');
             $record->status = 'completed';
             $record->save();
             $record = Record::with(['item'])->find($record->id)->toArray();

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS `records` (
   `sequence_key` int unsigned NOT NULL,
   `issue_image` varchar(255) NOT NULL,
   `fix_image` varchar(255) DEFAULT NULL,
+  `fix_uploaded_at` datetime DEFAULT NULL,
   `status` varchar(16) NOT NULL DEFAULT 'pending',
   `check_date` date DEFAULT NULL,
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
@@ -61,4 +62,4 @@ INSERT INTO `records` (`user_id`, `item_id`, `item_name_snapshot`, `item_score_s
 (2, 2, '桌面整理', 3, 2, '/uploads/issue_2.jpg', 'completed', CURDATE()),
 (2, 3, '设备摆放', 2, 3, '/uploads/issue_3.jpg', 'pending', CURDATE());
 
-UPDATE `records` SET `fix_image` = '/uploads/fix_2.jpg' WHERE `id` = 2;
+UPDATE `records` SET `fix_image` = '/uploads/fix_2.jpg', `fix_uploaded_at` = `created_at` WHERE `id` = 2;

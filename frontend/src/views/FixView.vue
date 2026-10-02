@@ -71,32 +71,69 @@
                   />
                 </div>
                 <div class="fix-arrow">
-                  <el-icon v-if="r.status === 'completed'" class="fix-check"><CircleCheck /></el-icon>
+                  <el-icon v-if="r.fix_image" class="fix-check"><CircleCheck /></el-icon>
                   <span v-else>→</span>
                 </div>
                 <div class="fix-img-box">
-                  <template v-if="r.status === 'completed' && r.fix_image">
-                    <img
+                  <div v-if="uploadingId === r.id" class="fix-uploading">
+                    <el-icon class="fix-spin"><Loading /></el-icon>
+                  </div>
+                  <template v-if="r.fix_image">
+                    <el-image
+                      class="fix-thumb"
                       :src="imageUrl(r.fix_image)"
-                      alt="整改图"
-                      @error="(e) => (e.target.style.display = 'none')"
-                    />
+                      :preview-src-list="[imageUrl(r.fix_image)]"
+                      preview-teleported
+                      fit="cover"
+                      hide-on-click-modal
+                    >
+                      <template #error>
+                        <div class="fix-thumb-error">图片加载失败</div>
+                      </template>
+                      <template #placeholder>
+                        <div class="fix-thumb-loading"><el-icon class="fix-spin"><Loading /></el-icon></div>
+                      </template>
+                    </el-image>
                   </template>
                   <template v-else>
-                    <div v-if="uploadingId === r.id" class="fix-uploading">
-                      <el-icon class="fix-spin"><Loading /></el-icon>
-                    </div>
-                    <div v-else class="fix-upload-area">
-                      <span>待处理</span>
+                    <div class="fix-upload-area">
+                      <el-icon class="fix-upload-icon"><Plus /></el-icon>
+                      <span>待上传整改图</span>
                       <el-upload
                         :show-file-list="false"
-                        accept="image/jpeg,image/png,image/gif"
-                        :before-upload="(file) => uploadFix(r.id, file)"
+                        :accept="ACCEPT_TYPES"
+                        :before-upload="(file) => uploadFix(r, file)"
                       >
                         <el-button type="primary" size="small">上传整改图</el-button>
                       </el-upload>
+                      <small class="fix-upload-limit">支持 JPG / PNG / GIF / WEBP，单张不超过 {{ maxMB }}MB</small>
                     </div>
                   </template>
+                </div>
+              </div>
+
+              <div v-if="r.fix_image" class="fix-card-foot">
+                <div class="fix-upload-meta">
+                  <span class="fix-upload-time">最后上传：{{ formatTime(r.fix_uploaded_at) }}</span>
+                  <span v-if="confirmedMap[r.id]" class="fix-confirmed">
+                    <el-icon><CircleCheckFilled /></el-icon>已确认图片正确
+                  </span>
+                  <span v-else class="fix-unconfirmed">请核对缩略图，确认是否为本次整改照片</span>
+                </div>
+                <div class="fix-actions">
+                  <el-button
+                    v-if="!confirmedMap[r.id]"
+                    type="success"
+                    size="small"
+                    @click="confirmFix(r.id)"
+                  >图片正确</el-button>
+                  <el-upload
+                    :show-file-list="false"
+                    :accept="ACCEPT_TYPES"
+                    :before-upload="(file) => uploadFix(r, file)"
+                  >
+                    <el-button size="small" :loading="uploadingId === r.id">重新上传</el-button>
+                  </el-upload>
                 </div>
               </div>
             </div>
@@ -108,10 +145,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { CircleCheck, Loading, Link } from '@element-plus/icons-vue'
+import { CircleCheck, CircleCheckFilled, Loading, Link, Plus } from '@element-plus/icons-vue'
 import { api, apiBase } from '@/api/request'
 
 const route = useRoute()
@@ -119,13 +156,50 @@ const loading = ref(true)
 const uploadingId = ref(null)
 const records = ref([])
 const onlyPending = ref(false)
+// 员工本地确认“传对了”的记录（刷新后需重新核对，不写入服务端状态）
+const confirmedMap = reactive({})
 
 const token = computed(() => route.query.token || '')
+
+// 与后端 UploadController 保持一致
+const MAX_SIZE = 10 * 1024 * 1024
+const maxMB = Math.round(MAX_SIZE / 1024 / 1024)
+const ACCEPT_TYPES = 'image/jpeg,image/png,image/gif,image/webp'
+const ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp']
 
 function imageUrl(path) {
   if (!path) return ''
   const base = apiBase() || (typeof window !== 'undefined' ? window.location.origin : '')
   return path.startsWith('http') ? path : (base.replace(/\/$/, '') + path)
+}
+
+function formatTime(t) {
+  if (!t) return '—'
+  // 兼容 "YYYY-MM-DD HH:mm:ss"（部分浏览器不能直接解析）
+  const d = new Date(typeof t === 'string' ? t.replace(/-/g, '/') : t)
+  if (Number.isNaN(d.getTime())) return String(t)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+// 上传前的前端校验：格式 + 大小，不通过直接提示，不发请求
+function validateImage(file) {
+  const name = file.name || ''
+  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
+  const typeOk = ALLOWED_EXT.includes(ext) || (file.type || '').startsWith('image/')
+  if (!typeOk) {
+    ElMessage.error('仅支持 JPG、PNG、GIF、WEBP 格式的图片，请重新拍摄或转换格式后上传')
+    return false
+  }
+  if (file.size > MAX_SIZE) {
+    ElMessage.error(`图片大小不能超过 ${maxMB}MB（当前约 ${(file.size / 1024 / 1024).toFixed(1)}MB），请压缩或重新拍摄后再上传`)
+    return false
+  }
+  if (!file.size) {
+    ElMessage.error('文件无效或为空，请重新拍摄后上传')
+    return false
+  }
+  return true
 }
 
 async function loadRecords() {
@@ -144,23 +218,41 @@ async function loadRecords() {
   }
 }
 
-async function uploadFix(recordId, file) {
-  uploadingId.value = recordId
+async function uploadFix(record, file) {
+  if (!validateImage(file)) return false
+  uploadingId.value = record.id
   try {
     const res = await api.uploadImage(file, token.value)
     if (!res?.path) throw new Error('上传失败')
-    await api.uploadFix(recordId, res.path, token.value)
-    const idx = records.value.findIndex((r) => r.id === recordId)
+    // 同一个 key 重复上传：覆盖 fix_image，服务端刷新 fix_uploaded_at（最后一次上传时间）
+    const updated = await api.uploadFix(record.id, res.path, token.value)
+    const idx = records.value.findIndex((r) => r.id === record.id)
+    const next = updated && updated.id
+      ? { ...record, ...updated }
+      : { ...record, fix_image: res.path, fix_uploaded_at: nowText(), status: 'completed' }
     if (idx !== -1) {
-      records.value[idx] = { ...records.value[idx], fix_image: res.path, status: 'completed' }
+      records.value[idx] = next
     }
-    ElMessage.success('整改已提交')
+    // 重新上传后需重新核对
+    delete confirmedMap[record.id]
+    ElMessage.success('上传成功，请核对缩略图确认是否传对')
   } catch (_) {
-    ElMessage.error('上传失败')
+    // request 拦截器已弹出服务端返回的“压缩或重新拍摄”等提示
   } finally {
     uploadingId.value = null
   }
   return false
+}
+
+function nowText() {
+  const d = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+function confirmFix(id) {
+  confirmedMap[id] = true
+  ElMessage.success('已确认整改图正确')
 }
 
 onMounted(loadRecords)
@@ -375,12 +467,37 @@ watch(onlyPending, loadRecords)
   overflow: hidden;
   background: rgba(0, 0, 0, 0.2);
   aspect-ratio: 4/3;
+  position: relative;
 }
 
 .fix-img-box img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.fix-thumb {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: zoom-in;
+}
+
+.fix-thumb :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fix-thumb-error,
+.fix-thumb-loading {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 13px;
 }
 
 .fix-arrow {
@@ -403,17 +520,76 @@ watch(onlyPending, loadRecords)
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   color: #94a3b8;
   font-size: 14px;
 }
 
+.fix-upload-icon {
+  font-size: 28px;
+  color: #64748b;
+}
+
+.fix-upload-limit {
+  color: #64748b;
+  font-size: 12px;
+  text-align: center;
+  line-height: 1.4;
+  padding: 0 8px;
+}
+
+.fix-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+}
+
+.fix-upload-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fix-upload-time {
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.fix-confirmed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #34d399;
+}
+
+.fix-unconfirmed {
+  font-size: 12px;
+  color: #fbbf24;
+}
+
+.fix-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .fix-uploading {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
 }
 
 .fix-spin {
