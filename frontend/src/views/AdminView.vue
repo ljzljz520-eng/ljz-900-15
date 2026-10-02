@@ -71,7 +71,7 @@
             :limit="20"
             multiple
             drag
-            accept="image/jpeg,image/png,image/gif"
+            accept="image/jpeg,image/png,image/gif,image/webp"
             list-type="picture-card"
             class="issue-upload"
             :on-preview="handlePreview"
@@ -81,7 +81,7 @@
             <div class="upload-content">
               <el-icon class="upload-icon"><UploadFilled /></el-icon>
               <p class="upload-text">拖拽图片到此处，或 <em>点击上传</em></p>
-              <p class="upload-hint">支持 JPG、PNG、GIF</p>
+              <p class="upload-hint">支持 JPG、PNG、GIF、WebP，单张 ≤5MB</p>
             </div>
           </el-upload>
         </div>

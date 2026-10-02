@@ -24,7 +24,7 @@
           <div>
             <h1 class="fix-title">员工整改</h1>
             <p v-if="!token" class="fix-warn">请通过扫码或链接（含 token）进入</p>
-            <p v-else class="fix-sub">查看待整改项并上传整改图（图片对按 #key 从小到大排序）</p>
+            <p v-else class="fix-sub">查看待整改项并上传整改图（传错可重新上传，将覆盖原图并更新上传时间）</p>
           </div>
         </div>
       </header>
@@ -75,28 +75,41 @@
                   <span v-else>→</span>
                 </div>
                 <div class="fix-img-box">
-                  <template v-if="r.status === 'completed' && r.fix_image">
-                    <img
-                      :src="imageUrl(r.fix_image)"
-                      alt="整改图"
-                      @error="(e) => (e.target.style.display = 'none')"
-                    />
-                  </template>
-                  <template v-else>
-                    <div v-if="uploadingId === r.id" class="fix-uploading">
-                      <el-icon class="fix-spin"><Loading /></el-icon>
+                  <div v-if="uploadingId === r.id" class="fix-uploading">
+                    <el-icon class="fix-spin"><Loading /></el-icon>
+                  </div>
+                  <template v-else-if="r.status === 'completed' && r.fix_image">
+                    <div class="fix-done">
+                      <img
+                        :src="imageUrl(r.fix_image)"
+                        alt="整改图"
+                        @error="(e) => (e.target.style.display = 'none')"
+                      />
+                      <div class="fix-done-bar">
+                        <span class="fix-done-time">
+                          {{ r.fix_uploaded_at ? '最后上传 ' + formatTime(r.fix_uploaded_at) : '已上传' }}
+                        </span>
+                        <el-upload
+                          :show-file-list="false"
+                          :accept="ACCEPT"
+                          :before-upload="(file) => uploadFix(r.id, file)"
+                        >
+                          <el-button size="small" type="primary" plain>重新上传</el-button>
+                        </el-upload>
+                      </div>
                     </div>
-                    <div v-else class="fix-upload-area">
-                      <span>待处理</span>
-                      <el-upload
-                        :show-file-list="false"
-                        accept="image/jpeg,image/png,image/gif"
-                        :before-upload="(file) => uploadFix(r.id, file)"
-                      >
-                        <el-button type="primary" size="small">上传整改图</el-button>
-                      </el-upload>
-                    </div>
                   </template>
+                  <div v-else class="fix-upload-area">
+                    <span>待处理</span>
+                    <el-upload
+                      :show-file-list="false"
+                      :accept="ACCEPT"
+                      :before-upload="(file) => uploadFix(r.id, file)"
+                    >
+                      <el-button type="primary" size="small">上传整改图</el-button>
+                    </el-upload>
+                    <span class="fix-upload-hint">支持 JPG/PNG/GIF/WebP，≤5MB</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -122,6 +135,33 @@ const onlyPending = ref(false)
 
 const token = computed(() => route.query.token || '')
 
+// 与后端 UploadController 保持一致：常见图片格式 + 单张 ≤5MB
+const MAX_SIZE_MB = 5
+const MAX_SIZE = MAX_SIZE_MB * 1024 * 1024
+const ACCEPT = 'image/jpeg,image/png,image/gif,image/webp'
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+
+function validateFile(file) {
+  const type = (file.type || '').toLowerCase()
+  const name = (file.name || '').toLowerCase()
+  // 部分手机浏览器 file.type 为空，兜底按扩展名判断
+  const formatOk = ALLOWED_TYPES.includes(type) || /\.(jpe?g|png|gif|webp)$/.test(name)
+  if (!formatOk) {
+    ElMessage.error('仅支持 JPG/PNG/GIF/WebP 格式图片')
+    return false
+  }
+  if (file.size > MAX_SIZE) {
+    ElMessage.error(`图片超过 ${MAX_SIZE_MB}MB，请压缩后再上传或重新拍摄`)
+    return false
+  }
+  return true
+}
+
+function formatTime(t) {
+  if (!t) return ''
+  return String(t).replace('T', ' ').slice(0, 16)
+}
+
 function imageUrl(path) {
   if (!path) return ''
   const base = apiBase() || (typeof window !== 'undefined' ? window.location.origin : '')
@@ -145,18 +185,29 @@ async function loadRecords() {
 }
 
 async function uploadFix(recordId, file) {
+  // 上传前先校验格式与大小，超限直接提示压缩或重拍，不发请求
+  if (!validateFile(file)) return false
   uploadingId.value = recordId
   try {
     const res = await api.uploadImage(file, token.value)
     if (!res?.path) throw new Error('上传失败')
-    await api.uploadFix(recordId, res.path, token.value)
+    // 同一个 key（记录）重复上传会覆盖旧图，服务端返回最新的 fix_uploaded_at
+    const updated = await api.uploadFix(recordId, res.path, token.value)
     const idx = records.value.findIndex((r) => r.id === recordId)
     if (idx !== -1) {
-      records.value[idx] = { ...records.value[idx], fix_image: res.path, status: 'completed' }
+      records.value[idx] = {
+        ...records.value[idx],
+        ...(updated && typeof updated === 'object' ? updated : {}),
+        fix_image: res.path,
+        status: 'completed',
+      }
     }
-    ElMessage.success('整改已提交')
-  } catch (_) {
-    ElMessage.error('上传失败')
+    ElMessage.success('上传成功，请核对缩略图是否传对；传错可点「重新上传」')
+  } catch (e) {
+    // 接口报错时拦截器已弹出服务端提示，这里只兜底本地异常
+    if (e?.message === '上传失败') {
+      ElMessage.error('上传失败，请重试')
+    }
   } finally {
     uploadingId.value = null
   }
@@ -381,6 +432,43 @@ watch(onlyPending, loadRecords)
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.fix-done {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.fix-done img {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: cover;
+}
+
+.fix-done-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(2, 6, 23, 0.75);
+}
+
+.fix-done-time {
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fix-upload-hint {
+  font-size: 12px;
+  color: #64748b;
 }
 
 .fix-arrow {

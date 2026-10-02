@@ -191,8 +191,10 @@ class RecordController
             if (!$fixImage) {
                 return api_json(['code' => 400, 'message' => '缺少 fix_image', 'data' => null]);
             }
+            // 同一个 key（记录）允许重新上传：覆盖 fix_image，并把 fix_uploaded_at 更新为最后一次上传时间
             $record->fix_image = $fixImage;
             $record->status = 'completed';
+            $record->fix_uploaded_at = date('Y-m-d H:i:s');
             $record->save();
             $record = Record::with(['item'])->find($record->id)->toArray();
             return api_json(['code' => 0, 'message' => 'ok', 'data' => $record]);

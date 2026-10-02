@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS `records` (
   `sequence_key` int unsigned NOT NULL,
   `issue_image` varchar(255) NOT NULL,
   `fix_image` varchar(255) DEFAULT NULL,
+  `fix_uploaded_at` datetime DEFAULT NULL,
   `status` varchar(16) NOT NULL DEFAULT 'pending',
   `check_date` date DEFAULT NULL,
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,

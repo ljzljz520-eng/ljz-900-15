@@ -7,6 +7,12 @@ use think\facade\Request;
 use think\Response;
 class UploadController
 {
+    /** 单张图片最大 5MB，超过提示员工压缩或重拍 */
+    private const MAX_SIZE = 5 * 1024 * 1024;
+    /** 常见图片格式白名单（扩展名与 MIME 双重校验） */
+    private const ALLOWED_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+    private const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
     private function getBearerToken(): ?string
     {
         $header = (string) Request::header('authorization', '');
@@ -52,6 +58,25 @@ class UploadController
             if (!$file) {
                 return api_json(['code' => 400, 'message' => '请选择文件', 'data' => null]);
             }
+            // 大小限制：超过 5MB 提示压缩或重拍
+            $size = (int) $file->getSize();
+            if ($size <= 0) {
+                return api_json(['code' => 400, 'message' => '文件为空，请重新拍摄或选择', 'data' => null]);
+            }
+            if ($size > self::MAX_SIZE) {
+                return api_json(['code' => 400, 'message' => '图片超过 5MB，请压缩后再上传或重新拍摄', 'data' => null]);
+            }
+            // 格式限制：扩展名白名单
+            $ext = strtolower($file->extension());
+            if (!in_array($ext, self::ALLOWED_EXTS, true)) {
+                return api_json(['code' => 400, 'message' => '仅支持 JPG/PNG/GIF/WebP 格式图片', 'data' => null]);
+            }
+            // 内容校验：MIME 白名单 + 必须能解析为真实图片，防止改后缀的非法文件
+            $tmp = $file->getRealPath() ?: $file->getPathname();
+            $mime = (string) $file->getMimeType();
+            if (!in_array($mime, self::ALLOWED_MIMES, true) || !@getimagesize($tmp)) {
+                return api_json(['code' => 400, 'message' => '文件内容不是有效图片，请重新拍摄或选择', 'data' => null]);
+            }
             $baseDir = public_path() . 'uploads';
             $dir = $baseDir;
             if ($scope === 'employee') {
@@ -62,13 +87,8 @@ class UploadController
             if (!is_dir($dir)) {
                 mkdir($dir, 0755, true);
             }
-            $ext = strtolower($file->extension());
-            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif'], true)) {
-                return api_json(['code' => 400, 'message' => '仅支持 jpg/png/gif', 'data' => null]);
-            }
             $name = date('YmdHis') . '_' . uniqid() . '.' . $ext;
             $path = $dir . DIRECTORY_SEPARATOR . $name;
-            $tmp = $file->getRealPath() ?: $file->getPathname();
             if ($tmp && is_uploaded_file($tmp)) {
                 move_uploaded_file($tmp, $path);
             } else {
